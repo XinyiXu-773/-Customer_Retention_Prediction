@@ -1,6 +1,6 @@
 # Customer Retention Prediction & Strategy (PlatefulNZ Case)
 
-## 📌 Project Overview
+## Project Overview
 This project aims to **predict customer churn (non-retention)** and translate model outputs into **actionable retention strategies**.  
 Using customer behavioral, transactional, and satisfaction data, the analysis focuses on identifying **high-risk customers early** and supporting **targeted intervention decisions**.
 
@@ -8,7 +8,7 @@ The project is structured as a **reproducible analytics pipeline**, combining pr
 
 ---
 
-## 📊 Data Description
+## Data Description
 - **Observations:** ~1,500 customers  
 - **Features:** Demographics, purchase behavior, engagement metrics, satisfaction indicators  
 - **Target Variable:**  
@@ -20,7 +20,7 @@ The project is structured as a **reproducible analytics pipeline**, combining pr
 
 ---
 
-## 🧠 Methodology
+## Methodology
 The analysis follows a structured workflow:
 
 1. **Data Cleaning & Feature Engineering**
@@ -43,7 +43,7 @@ The analysis follows a structured workflow:
      - Churn Recall & F1-score
 
 4. **Threshold Optimization**
-   - Classification threshold adjusted beyond default 0.5
+   - Classification threshold adjusted beyond the default 0.5
    - Optimized for **churn detection performance** under business constraints
 
 5. **Customer Segmentation (Clustering)**
@@ -55,7 +55,7 @@ The analysis follows a structured workflow:
 
 ---
 
-## 📈 Key Findings
+## Key Findings
 - Customers with **higher purchase frequency** and **shorter inactivity periods** are significantly more likely to be retained
 - Lower satisfaction scores are strongly associated with churn risk
 - Random Forest slightly outperforms Logistic Regression in overall discrimination (AUC > 0.9)
@@ -64,7 +64,7 @@ The analysis follows a structured workflow:
 
 ---
 
-## 🎯 Business Recommendations
+## Business Recommendations
 Based on model predictions and customer segments:
 
 - **High-risk & inactive users:** Win-back campaigns with personalized incentives  
@@ -75,5 +75,5 @@ These strategies aim to improve retention efficiency while controlling intervent
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
