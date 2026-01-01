@@ -99,3 +99,27 @@ These strategies aim to improve retention efficiency while controlling intervent
 4. Render the Quarto report:
    quarto render Analysis_Code.qmd
 5. The rendered HTML report will be generated in the docs/ directory
+
+---
+
+## Tools & Libraries
+Programming Language:
+- R
+- Quarto
+
+Core Libraries:
+- tidyverse
+- tidymodels
+- ggplot2
+
+Modeling & Evaluation:
+- Logistic Regression (glm)
+- randomForest
+- yardstick
+
+Clustering & Visualization:
+- cluster
+- factoextra
+
+Reproducibility:
+- renv (optional)
