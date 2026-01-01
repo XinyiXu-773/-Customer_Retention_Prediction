@@ -34,24 +34,25 @@ The analysis follows a structured workflow:
    - Variable importance screening
 
 3. **Predictive Modeling**
-   - Logistic Regression (baseline & interpretable)
-   - Random Forest (non-linear benchmark)
-   - Cross-validation with consistent resampling
-   - Evaluation metrics:
-     - ROC-AUC
-     - PR-AUC (for class imbalance)
-     - Churn Recall & F1-score
+- Logistic Regression (baseline & interpretable)
+- Random Forest (non-linear benchmark)
+- Cross-validation with consistent data splits
+- Model evaluation using multiple metrics:
+  - ROC-AUC
+  - PR-AUC (for class imbalance)
+  - Churn Recall & F1-score
 
-4. **Threshold Optimization**
-   - Classification threshold adjusted beyond the default 0.5
-   - Optimized for **churn detection performance** under business constraints
+4. **Threshold Considerations**
+- Model performance evaluated beyond default accuracy metrics
+- Emphasis placed on churn-related metrics such as recall and PR-AUC
+- Results interpreted with potential threshold adjustment in mind for business use
 
 5. **Customer Segmentation (Clustering)**
-   - K-means clustering on behavioral features
-   - Number of clusters selected using:
-     - Elbow Method (WSS)
-     - Silhouette Score
-   - Clusters profiled and mapped to tailored retention actions
+- K-means clustering applied to key behavioral features
+- Number of clusters informed by:
+  - Elbow Method (WSS)
+  - Silhouette Score
+- Cluster profiles interpreted to support differentiated retention strategies
 
 ---
 
