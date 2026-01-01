@@ -76,4 +76,26 @@ These strategies aim to improve retention efficiency while controlling intervent
 ---
 
 ## Project Structure
+├── Analysis_Code.qmd        # Main Quarto analysis & report
+├── code/                    # Modular R scripts
+│   ├── 00_setup.R           # Package loading, seed setting
+│   ├── 01_data_cleaning.R   # Data cleaning & feature engineering
+│   ├── 02_eda.R             # Exploratory data analysis
+│   ├── 03_modeling.R        # Predictive modeling & evaluation
+│   └── 04_clustering.R      # Customer segmentation & profiling
+├── data/                    # Data folder (raw data excluded)
+├── docs/                    # Rendered HTML report (GitHub Pages)
+│   └── index.html
+├── outputs/                 # Figures and tables
+├── README.md
+└── LICENSE
 
+---
+
+## How to Reproduce
+1. Clone this repository
+2. Open the project in RStudio
+3. Install required R packages (listed in the setup script)
+4. Render the Quarto report:
+   quarto render Analysis_Code.qmd
+5. The rendered HTML report will be generated in the docs/ directory
