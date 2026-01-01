@@ -1,2 +1,79 @@
-# -Customer_Retention_Prediction
-Customer retention prediction project using a New Zealand meal-kit dataset (200k+ records, 26 variables). Focused on data cleaning, feature selection, and handling multicollinearity. Compared logistic regression and random forest models using ROC/AUC and other classification metrics to derive actionable insights.
+# Customer Retention Prediction & Strategy (PlatefulNZ Case)
+
+## 📌 Project Overview
+This project aims to **predict customer churn (non-retention)** and translate model outputs into **actionable retention strategies**.  
+Using customer behavioral, transactional, and satisfaction data, the analysis focuses on identifying **high-risk customers early** and supporting **targeted intervention decisions**.
+
+The project is structured as a **reproducible analytics pipeline**, combining predictive modeling and customer segmentation to support data-driven retention planning.
+
+---
+
+## 📊 Data Description
+- **Observations:** ~1,500 customers  
+- **Features:** Demographics, purchase behavior, engagement metrics, satisfaction indicators  
+- **Target Variable:**  
+  - `retained` (binary)  
+  - Defined as whether a customer remains active within a 90-day observation window  
+  - Modeling focuses on identifying **churn (non-retention)** as the positive class
+
+> Note: Raw data is not publicly shared. Processed data and variable definitions are documented for reproducibility.
+
+---
+
+## 🧠 Methodology
+The analysis follows a structured workflow:
+
+1. **Data Cleaning & Feature Engineering**
+   - Missing value handling
+   - Factor encoding
+   - Feature scaling for clustering
+
+2. **Exploratory Data Analysis (EDA)**
+   - Retention rate distribution
+   - Key behavioral differences between retained and churned customers
+   - Variable importance screening
+
+3. **Predictive Modeling**
+   - Logistic Regression (baseline & interpretable)
+   - Random Forest (non-linear benchmark)
+   - Cross-validation with consistent resampling
+   - Evaluation metrics:
+     - ROC-AUC
+     - PR-AUC (for class imbalance)
+     - Churn Recall & F1-score
+
+4. **Threshold Optimization**
+   - Classification threshold adjusted beyond default 0.5
+   - Optimized for **churn detection performance** under business constraints
+
+5. **Customer Segmentation (Clustering)**
+   - K-means clustering on behavioral features
+   - Number of clusters selected using:
+     - Elbow Method (WSS)
+     - Silhouette Score
+   - Clusters profiled and mapped to tailored retention actions
+
+---
+
+## 📈 Key Findings
+- Customers with **higher purchase frequency** and **shorter inactivity periods** are significantly more likely to be retained
+- Lower satisfaction scores are strongly associated with churn risk
+- Random Forest slightly outperforms Logistic Regression in overall discrimination (AUC > 0.9)
+- Adjusting the classification threshold improves **churn recall**, supporting proactive retention targeting
+- Clustering reveals distinct customer segments with **different churn drivers**, enabling targeted interventions
+
+---
+
+## 🎯 Business Recommendations
+Based on model predictions and customer segments:
+
+- **High-risk & inactive users:** Win-back campaigns with personalized incentives  
+- **Low-satisfaction but active users:** Service recovery and experience improvements  
+- **Price-sensitive segments:** Subscription optimization and targeted discounts  
+
+These strategies aim to improve retention efficiency while controlling intervention costs.
+
+---
+
+## 📁 Project Structure
+
