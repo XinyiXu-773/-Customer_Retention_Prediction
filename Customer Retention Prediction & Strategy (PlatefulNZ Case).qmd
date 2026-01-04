@@ -1,0 +1,1005 @@
+---
+title: "Predicting Customer Retention at PlatefulNZ"
+author: "Group 9: Xinglai Chen 942612360, Wenjie Gong 869888212, Xuzhong Song 634140891, Qixuan Xiao 203516893, Xinyi Xu 868700257"
+format:
+  html:
+    number-sections: true
+    toc: true
+    theme: cosmo
+fig-cap-location: top
+fontsize: 12pt
+papersize: a4
+mainfont: Latin Modern Roman
+sansfont: Latin Modern Roman
+fig-showtext: true
+editor: visual
+---
+
+<!-- Reduce the whitespace under the heading -->
+
+```{=latex}
+\vspace*{-60pt}
+```
+---
+
+<!-- Install functional packages -->
+
+```{r setup, message=FALSE, warning=FALSE, echo=FALSE}
+# Activate renv for reproducibility
+# renv::activate()
+
+library(tidyverse)
+library(tidymodels)
+library(GGally)
+library(car)
+library(themis)
+library(ranger)
+library(kableExtra)
+library(performance)
+library(broom)
+library(future)
+library(doFuture)
+
+plan(multisession, workers = max(1, parallel::detectCores() - 1))
+registerDoFuture()
+```
+
+<!-- 1. Import data -->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+customers <- readr::read_csv(
+  "platefulnz_customers.csv",
+  show_col_types = FALSE
+)
+
+# Basic sanity checks
+dim(customers)
+glimpse(customers)
+table(customers$retained_binary)
+```
+
+<!-- 2. Data clean -->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+cust_base <- customers %>%
+  mutate(
+    # Outcome: churn = positive class
+    retained_binary = factor(
+      retained_binary,
+      levels = c(0, 1),
+      labels = c("Not Retained", "Retained")
+    ),
+
+    # numeric version ONLY for correlation analysis
+    retained_numeric = as.integer(retained_binary == "Not Retained"),
+
+    # ensure numeric
+    weeks_since_last_purchase = readr::parse_number(weeks_since_last_purchase),
+
+    # ordered factor (levels fixed explicitly)
+    satisfaction_survey = factor(
+      satisfaction_survey,
+      levels = c("NoResponse", "1", "2", "3", "4", "5"),
+      ordered = TRUE
+    ),
+
+    # factor with fixed levels
+    discounted_rate_last_purchase = factor(
+      discounted_rate_last_purchase,
+      levels = c(0, 1),
+      labels = c("Full Price", "Discounted")
+    ),
+    subscription_payment_problem_last4Weeks =
+      factor(subscription_payment_problem_last4Weeks)
+  ) %>%
+  filter(
+    !is.na(weeks_since_last_purchase),
+    weeks_since_last_purchase >= 0
+  )
+
+# Check churn rate (positive class)
+cust_base %>%
+  count(retained_binary) %>%
+  mutate(pct = n / sum(n))
+```
+
+<!-- 3. Check for NA value -->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+cust_base %>%
+  summarise(across(
+    c(
+      retained_binary,
+      satisfaction_survey,
+      num_purchases,
+      weeks_since_last_purchase,
+      discounted_rate_last_purchase,
+      subscription_payment_problem_last4Weeks
+    ),
+    ~ sum(is.na(.)),
+    .names = "na_{.col}"
+  ))
+```
+
+## Introduction
+
+PlatefulNZ, a meal kit company that offers locally sourced recipes in New Zealand, is concerned about its current business performance and customer churn factors. This report aims to analyze key attributes of PlatefulNZ's customers to identify customer retention and churn drivers.
+
+## Dataset Overview
+
+The dataset used in this analysis combines transactional, subscription, and engagement records from PlatefulNZ's customer database for the 90 days between April and June. It includes 200,000 observations and key variables relevant to retention, such as num_purchases (total purchases in the period), weeks_since_last_purchase (recency measure), satisfaction_survey (ordinal rating from 1–5), and discounted_rate_last_purchase (binary indicator of whether the last purchase accepted a discount). The target variable, retained_binary, classifies customers as retained (1) or not retained (0). The dataset was cleaned to enable accurate visualization and modelling by removing duplicates, checking for missing values, recording categorical variables, and verifying numeric values.
+
+## Exploratory data analysis
+
+Figure 1 presents the overall retention distribution, revealing that 78.2% of customers were retained during the 90-day observation period, while 21.8% churned, highlighting that nearly one in five customers disengage within a short period. The outcome concluded 10 important variables using the random rule, highlighting purchasing frequency, discount rate of last purchase, satisfaction scores, and weeks since previous purchase, as shown in Figure 2. A matrix was made to examine the correlation between numeric variables, which include num_purchases and weeks_since_last_purchase, and the status of customer retention. The box plots indicate that retained customers have a higher median purchase count and fewer weeks since their last purchase. It is worth mentioning that there is a correlation of -0.233 between weeks_since_last_purchase and retention, but this may underestimate the relationship. In contrast, Table 1 illustrates a more precise correlation of 0.356 based on the entire dataset, better reflecting the overall trend.
+
+<!-- 4. Split data -->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+set.seed(123)
+
+data_split <- initial_split(
+  cust_base,
+  prop   = 0.8,
+  strata = retained_binary   # stratify by churn
+)
+
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+# sanity check
+train_data %>%
+  count(retained_binary) %>%
+  mutate(pct = n / sum(n))
+
+test_data %>%
+  count(retained_binary) %>%
+  mutate(pct = n / sum(n))
+```
+
+<!-- Create pie chart of retention rate -->
+
+**Figure 1**\
+*Retention Rate Distribution*
+
+```{r, message=FALSE, echo=FALSE, fig.width=4, fig.height=3, fig.pos='H'}
+retained_pct <- cust_base |> 
+  count(retained_binary) |> 
+  mutate(
+    perc = n / sum(n) * 100,
+    label = paste0(round(perc, 1), "%")
+  )
+
+ggplot(retained_pct, aes(x = "", y = perc, fill = retained_binary)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar("y") +
+  geom_text(
+    aes(label = label),
+    position = position_stack(vjust = 0.5),
+    size = 5
+  ) +
+  scale_fill_manual(
+    values = c("lightblue", "skyblue"),
+    labels = c("Not Retained", "Retained")
+  ) +
+  labs(fill = "Retained Status",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_void()
+```
+
+<!-- 5. Exploratory Data Analysis-->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+# Correlation + Chi-square
+cor_np <- cor.test(train_data$num_purchases, as.integer(train_data$retained_binary == "Not Retained"))
+cor_ws <- cor.test(train_data$weeks_since_last_purchase, as.integer(train_data$retained_binary == "Not Retained"))
+
+chisq_dis <- chisq.test(table(train_data$discounted_rate_last_purchase, train_data$retained_binary))
+chisq_sat <- chisq.test(table(train_data$satisfaction_survey, train_data$retained_binary))
+
+tibble(
+  Test = c("Correlation: num_purchases vs churn",
+           "Correlation: weeks_since_last_purchase vs churn",
+           "Chi-square: discount vs churn",
+           "Chi-square: satisfaction vs churn"),
+  Statistic = c(unname(cor_np$estimate),
+                unname(cor_ws$estimate),
+                unname(chisq_dis$statistic),
+                unname(chisq_sat$statistic)),
+  p_value = c(cor_np$p.value, cor_ws$p.value, chisq_dis$p.value, chisq_sat$p.value)
+)
+
+# RF importance
+set.seed(123)
+rf_screen <- ranger(
+  retained_binary ~ .,
+  data = train_data %>% select(retained_binary, num_purchases, weeks_since_last_purchase,
+                               satisfaction_survey, discounted_rate_last_purchase,
+                               subscription_payment_problem_last4Weeks),
+  num.trees = 200,
+  importance = "impurity",
+  classification = TRUE,
+  probability = TRUE
+)
+
+imp <- sort(rf_screen$variable.importance, decreasing = TRUE)
+imp
+```
+
+<!-- Top 10 important variables -->
+
+**Figure 2**\
+*Top 10 Important Variables*
+
+```{r,message=FALSE, echo=FALSE}
+imp_df <- data.frame(
+  variable = names(imp),
+  importance = imp
+)
+imp_df |> 
+  top_n(10, importance) |> 
+  ggplot(aes(x = reorder(variable, importance), y = importance)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(x = "Variable", y = "Importance") +
+  theme_minimal()
+```
+
+<!-- Group: Purchase behavior related -->
+
+**Figure 3**\
+*Relationships Between Purchase Behavior and Customer Retention*
+
+```{r fig.width=6, fig.height=4, message=FALSE, echo=FALSE, cache=TRUE}
+ggpairs(
+  cust_base |> select(num_purchases, weeks_since_last_purchase, retained_binary),
+  aes(color = cust_base$retained_binary, alpha = 0.4),
+  progress = FALSE
+)
+```
+
+Moreover, Table 1 displays that the correlation coefficient between num_purchases and retention rate is -0.422, a moderate positive correlation. The result further supports the opinion that frequent purchases could improve retention. These last two variables are statistically significant (p \< 0.001) with customer retention, reinforcing the importance of customer experience.
+
+<!-- Table1: summary of Variable Association with Retention -->
+
+```{r table1, message=FALSE, results='asis', echo=FALSE}
+fmt_p <- function(p) {
+  if (is.na(p)) return("–")
+  if (p < 0.001) return("< 0.001")
+  sprintf("%.4f", p)
+}
+assoc_table <- data.frame(
+  Variable = c("num_purchases", 
+               "weeks_since_last_purchase", 
+               "discounted_rate_last_purchase", 
+               "satisfaction_survey"),
+  Type = c("Numeric", "Numeric", "Binary", "Ordinal"),
+  `Correlation (r)` = c(
+    round(cor_np$estimate, 3),
+    round(cor_ws$estimate, 3),
+    "–", "–"
+  ),
+  `p-value` = c(
+    fmt_p(cor_np$p.value),
+    fmt_p(cor_ws$p.value),
+    fmt_p(chisq_dis$p.value),
+    fmt_p(chisq_sat$p.value)
+  ),
+  Interpretation = c(
+    "Moderate positive correlation",
+    "Weak negative correlation",
+    "Strong significant association",
+    "Strong significant association"
+  )
+)
+
+if (knitr::is_latex_output()) {
+  cat("\\makebox[\\textwidth][l]{\\textbf{Table 1}}\\\\\n")
+  cat("\\makebox[\\textwidth][l]{\\textit{Summary of Variable Association with Retention}}\\\\\n\n")
+} else {
+  cat("**Table 1**  \n*Summary of Variable Association with Retention*\n\n")
+}
+
+knitr::kable(
+  assoc_table,
+  format = "html",
+  booktabs = TRUE,
+  col.names = c("Variable", "Type", "Correlation (r)", "p-value", "Interpretation")
+) |>
+kableExtra::kable_styling(
+  bootstrap_options = c("striped", "hover", "condensed"),
+  font_size = 12
+)
+```
+
+Figure 4 presents satisfaction distribution by retention status, indicating that customers with moderate to high satisfaction scores (3–5) are more likely to remain subscribed. Figure 5 highlights a sharp drop in retention after five weeks of inactivity, with rates approaching zero by week nine.
+
+<!-- Create bar chart between satisfaction survey and retention rate -->
+
+::::: {.columns layout-ncol="2"}
+::: column
+**Figure 4**\
+*Satisfaction vs Retention*
+
+```{r, message=FALSE, echo=FALSE}
+ggplot(cust_base, aes(x = satisfaction_survey, fill = retained_binary)) +
+  geom_bar(position = "stack") +
+  scale_fill_manual(values = c("Not Retained" = "lightblue", "Retained" = "skyblue")) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    panel.background = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    axis.text.x = element_text(size = 12),
+    axis.title.x = element_text(size = 13),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 13),
+    legend.text = element_text(size = 11),
+    legend.title = element_text(size = 12),
+    text = element_text(size = 12),
+    axis.line = element_blank()
+  ) +
+  labs(x = "Satisfaction Score",
+    y = "Count",
+    fill = "Retention Status"
+  )
+```
+:::
+
+::: column
+<!-- Create line chart between weeks since last purchase and retention rate -->
+
+**Figure 5**\
+*Retention Rate by Purchase Week*
+
+```{r, message=FALSE, echo=FALSE}
+retention_by_week <- cust_base |>
+  group_by(weeks_since_last_purchase) |>
+  summarise(
+    retention_rate = mean(retained_binary == "Retained"),
+    count = n()
+  )
+
+ggplot(retention_by_week, aes(x = weeks_since_last_purchase, y = retention_rate)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = 0:12) +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(x = "Weeks Since Last Purchase",
+    y = "Retention Rate"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA),
+    panel.grid = element_blank(),
+    axis.text.x = element_text(size = 12),
+    axis.title.x = element_text(size = 13),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 13),
+    legend.text = element_text(size = 11),
+    legend.title = element_text(size = 12),
+    text = element_text(size = 12)
+  )
+```
+:::
+:::::
+Figure 6 shows retention by purchase frequency group, with the highest rates among customers making 8–12 purchases, suggesting that increasing purchase frequency could substantially improve retention. The retention rates for customers whose last purchase was discounted versus full price reveal a markedly lower retention rate for the discounted group, as shown in Figure 7. This likely reflects discounts as an attempt for customers already at high churn risk, rather than as a long-term loyalty driver.
+
+<!-- Create bar chart between number of purchases and retention rate -->
+
+::::: {.columns layout-ncol="2"}
+::: column
+**Figure 6**\
+*Retention Rate by Purchase Frequency Group*
+
+```{r, message=FALSE, echo=FALSE, fig.width=6, fig.height=4}
+cust1 <- cust_base |> 
+  mutate(purchase_bin = cut(num_purchases,
+                            breaks = c(-1, 3, 7, Inf),
+                            labels = c("0–3", "4–7", "8-12")))
+
+bin_retention_purchases <- cust1 |> 
+  group_by(purchase_bin) |> 
+  summarise(retention_rate = mean(retained_binary == "Retained", na.rm = TRUE))
+
+ggplot(bin_retention_purchases, aes(x = purchase_bin, y = retention_rate)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = NA) +
+  geom_text(aes(label = percent(retention_rate, accuracy = 1)), 
+            vjust = -0.5, size = 4) +
+  scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1.1)) +
+  labs(x = "Number of Purchases (Grouped)",
+    y = "Retention Rate"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+    panel.grid = element_blank(),
+    axis.text.x = element_text(size = 12),
+    axis.title.x = element_text(size = 13),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 13),
+    legend.text = element_text(size = 11),
+    legend.title = element_text(size = 12),
+    text = element_text(size = 12)
+  )
+```
+:::
+
+::: column
+<!-- Create bar chart between discounted rate last purchase and retention rate -->
+
+**Figure 7**\
+*Retention Rate by discounted rate last purchase*
+
+```{r, message=FALSE, echo=FALSE, fig.width=6, fig.height=4}
+ggplot(
+  cust_base,
+  aes(x = discounted_rate_last_purchase, fill = retained_binary)
+) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x = "Discounted rate last purchase",
+    y = "Retention Rate",
+    fill = "Retention Status"
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(
+    values = c("Not Retained" = "lightblue", "Retained" = "skyblue"),
+    breaks = c("Not Retained", "Retained"),
+    name   = "Retention Status"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+    panel.grid = element_blank(),
+    axis.text.x = element_text(size = 12),
+    axis.title.x = element_text(size = 13),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 13),
+    legend.text = element_text(size = 11),
+    legend.title = element_text(size = 12),
+    text = element_text(size = 12))
+```
+:::
+:::::
+
+Insights from this exploratory analysis directly informed the selection of factors for the predictive model, focusing on purchase behaviour, satisfaction, and operational reliability as key drivers of customer retention.
+
+## Modelling
+
+### Assumptions
+
+For Logistic Regression:
+
+-   Each predictor has a linear relationship with the log-odds of retention.
+
+-   Predictors are independent and have no multicollinearity (VIF \< 5).
+
+For Random Forest:
+
+-   No assumptions on linearity or distribution, but predictors are relevant and informative.
+
+<!-- 6. Cross-validation folds (training) -->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+set.seed(123)
+
+folds <- vfold_cv(
+  train_data,
+  v = 5,
+  strata = retained_binary
+)
+
+folds
+```
+
+### Methods
+
+To compare model performance, we applied stratified K-fold cross-validation with K = 5, implemented using the `vfold_cv()` function from the tidymodels framework. The training dataset was partitioned into five equally sized folds while preserving the proportion of retained and not retained customers in each fold. In each iteration, four folds were used for model training and the remaining fold was used for validation. This procedure was repeated five times so that each fold served as the validation set once. Model performance was then evaluated by averaging the results across all folds, which helps reduce variability and bias associated with a single train–test split.
+
+<!-- 7. Recipes -->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+# 6.1 Logistic Regression recipe (dummy)
+logit_recipe <- recipe(
+  retained_binary ~ 
+    num_purchases +
+    weeks_since_last_purchase +
+    satisfaction_survey +
+    discounted_rate_last_purchase,
+  data = train_data
+) %>%
+  step_naomit(all_predictors()) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_upsample(retained_binary)
+```
+
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+# 6.2 Random Forest recipe (no dummy)
+rf_recipe <- recipe(
+  retained_binary ~ 
+    num_purchases +
+    weeks_since_last_purchase +
+    satisfaction_survey +
+    discounted_rate_last_purchase,
+  data = train_data
+) %>%
+  step_naomit(all_predictors()) %>%
+  step_upsample(retained_binary)
+```
+
+<!-- Check multicollinearity among predictors using VIF -->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+glm_model <- glm(
+  retained_binary ~ num_purchases + weeks_since_last_purchase + discounted_rate_last_purchase,
+  data = cust_base,
+  family = binomial
+)
+
+vif(glm_model)
+```
+
+<!-- VIF: satisfaction survey -->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+glm_satis <- glm(
+  retained_binary ~ satisfaction_survey + num_purchases,
+  data = cust_base,
+  family = binomial
+)
+
+vif_satis <- performance::check_collinearity(glm_satis)
+vif_satis
+vif_satis_value <- round(
+  vif_satis$VIF[vif_satis$Term == "satisfaction_survey"],
+  3
+)
+```
+
+The same predictors were used for both models: num_purchases, weeks_since_last_purchase, satisfaction_survey, and discounted_rate_last_purchase(see Figure 2). Multicollinearity was checked using the Variance Inflation Factor (VIF), and all predictors had VIF \< 5, indicating no multicollinearity(see Table 2). After running both models, Random Forest slightly outperformed Logistic Regression due to its higher predictive Accuracy while maintaining good recall and specificity.
+
+<!-- Table 2: Create table about VIF values-->
+
+```{r table2, message=FALSE, results='asis', echo=FALSE}
+vif_values <- car::vif(glm_model)
+
+model_summary <- tibble::tibble(
+  Metric = c(
+    "VIF (num_purchases)", 
+    "VIF (weeks_since_last_purchase)",
+    "VIF (satisfaction_survey)", 
+    "VIF (discounted_rate_last_purchase)"
+  ),
+  Value = c(
+    round(vif_values["num_purchases"], 3),
+    round(vif_values["weeks_since_last_purchase"], 3),
+    vif_satis_value, 
+    round(vif_values["discounted_rate_last_purchase"], 3)
+  ),
+  Interpretation = c(
+    "< 5: No multicollinearity issue",
+    "< 5: No multicollinearity issue",
+    "< 5: No multicollinearity issue",
+    "< 5: No multicollinearity issue"
+  )
+)
+
+if (knitr::is_latex_output()) {
+  cat("\\makebox[\\textwidth][l]{\\textbf{Table 2}}\\\\\n")
+  cat("\\makebox[\\textwidth][l]{\\textit{Summary statistics of VIF values}}\\\\\n\n")
+} else {
+  cat("**Table 2**  \n*Summary statistics of VIF values*\n\n")
+}
+
+knitr::kable(
+  model_summary,
+  format = "html",
+  booktabs = TRUE,
+  col.names = c("Metric", "Value", "Interpretation")
+) |>
+kableExtra::kable_styling(
+  latex_options = c("hold_position", "scale_down"),
+  font_size = 12
+)
+cat('\n\n')
+```
+
+<!-- 8. Logistic Regression -->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+logit_spec <- logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+
+logit_wf <- workflow() %>%
+  add_recipe(logit_recipe) %>%
+  add_model(logit_spec)
+
+logit_res <- fit_resamples(
+  logit_wf,
+  resamples = folds,
+  metrics = metric_set(
+    roc_auc,
+    accuracy,
+    sens,
+    spec
+  ),
+  control = control_resamples(save_pred = TRUE)
+)
+
+collect_metrics(logit_res)
+```
+
+<!-- 9. Random Forest -->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+rf_spec <- rand_forest(
+  mtry  = tune(),
+  min_n = tune(),
+  trees = 400
+) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("classification")
+
+rf_wf <- workflow() %>%
+  add_recipe(rf_recipe) %>%
+  add_model(rf_spec)
+
+rf_grid <- tidyr::crossing(
+  mtry  = c(2, 3, 4),
+  min_n = c(5, 10)
+)
+rf_grid
+```
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+rf_res <- tune_grid(
+  rf_wf,
+  resamples = folds,
+  grid = rf_grid,
+  metrics = metric_set(
+    roc_auc,
+    accuracy,
+    sens,
+    spec
+  ),
+  control = control_resamples(save_pred = TRUE)
+)
+
+collect_metrics(rf_res)
+
+rf_best <- select_best(rf_res, metric = "roc_auc")
+rf_best
+
+# Final RF CV
+rf_final <- finalize_workflow(rf_wf, rf_best)
+
+rf_cv <- fit_resamples(
+  rf_final,
+  resamples = folds,
+  metrics = metric_set(
+    roc_auc,
+    accuracy,
+    sens,
+    spec
+  ),
+  control = control_resamples(save_pred = TRUE)
+)
+
+collect_metrics(rf_cv)
+```
+
+<!-- 10. Model Comparison -->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+logit_metrics <- collect_metrics(logit_res) %>%
+  select(.metric, mean) %>%
+  pivot_wider(names_from = .metric, values_from = mean) %>%
+  mutate(Model = "Logistic Regression")
+
+rf_metrics <- collect_metrics(rf_cv) %>%
+  select(.metric, mean) %>%
+  pivot_wider(names_from = .metric, values_from = mean) %>%
+  mutate(Model = "Random Forest")
+
+model_comparison <- bind_rows(logit_metrics, rf_metrics) %>%
+  select(
+    Model,
+    accuracy,
+    sens,
+    spec,
+    roc_auc
+  ) %>%
+  rename(
+    Accuracy = accuracy,
+    `Recall (Churn)` = sens,
+    Specificity = spec,
+    AUC = roc_auc
+  )
+
+knitr::kable(model_comparison, digits = 3, caption = "Model Performance (5-fold CV)") %>%
+  kableExtra::kable_styling(full_width = FALSE, bootstrap_options = c("striped", "condensed"))
+```
+
+<!-- 11. Test set evaluation -->
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+# Logistic Regression
+logit_final <- fit(logit_wf, data = train_data)
+
+logit_test_pred <- predict(logit_final, test_data, type = "prob") %>%
+  bind_cols(predict(logit_final, test_data)) %>%
+  bind_cols(test_data %>% select(retained_binary))
+
+conf_mat(
+  logit_test_pred,
+  truth = retained_binary,
+  estimate = .pred_class
+)
+
+logit_test_auc <- roc_auc(
+  logit_test_pred,
+  truth = retained_binary,
+  `.pred_Not Retained`
+)
+logit_test_auc
+
+logit_test_roc <- roc_curve(
+  logit_test_pred,
+  truth = retained_binary,
+  `.pred_Not Retained`
+)
+
+# Confusion matrix
+conf_mat(logit_test_pred, truth = retained_binary, estimate = .pred_class)
+
+# Metrics on test set
+test_metrics <- metric_set(accuracy, sens, spec, roc_auc)(
+  logit_test_pred,
+  truth = retained_binary,
+  estimate = .pred_class,
+  `.pred_Not Retained`
+)
+test_metrics
+```
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+# RF
+rf_final_fit <- fit(rf_final, data = train_data)
+rf_test_pred <- predict(rf_final_fit, test_data, type = "prob") %>%
+  bind_cols(predict(rf_final_fit, test_data)) %>%
+  bind_cols(test_data %>% select(retained_binary))
+
+conf_mat(
+  rf_test_pred,
+  truth = retained_binary,
+  estimate = .pred_class
+)
+
+rf_test_auc <- roc_auc(
+  rf_test_pred,
+  truth = retained_binary,
+  `.pred_Not Retained`
+)
+
+rf_test_auc
+
+rf_test_roc <- roc_curve(
+  rf_test_pred,
+  truth = retained_binary,
+  `.pred_Not Retained`
+)
+
+rf_test_metrics <- metric_set(
+  accuracy,
+  sens,
+  spec,
+  roc_auc
+)(
+  rf_test_pred,
+  truth = retained_binary,
+  estimate = .pred_class,
+  `.pred_Not Retained`
+)
+
+rf_test_metrics
+```
+
+```{r, message=FALSE, echo=FALSE, results = "hide"}
+logit_test_tbl <- test_metrics %>%
+  select(.metric, .estimate) %>%
+  pivot_wider(names_from = .metric, values_from = .estimate) %>%
+  mutate(Model = "Logistic Regression")
+
+rf_test_tbl <- rf_test_metrics %>%
+  select(.metric, .estimate) %>%
+  pivot_wider(names_from = .metric, values_from = .estimate) %>%
+  mutate(Model = "Random Forest")
+
+test_comparison <- bind_rows(logit_test_tbl, rf_test_tbl) %>%
+  select(
+    Model,
+    accuracy,
+    sens,
+    spec,
+    roc_auc
+  ) %>%
+  rename(
+    Accuracy = accuracy,
+    `Recall (Churn)` = sens,
+    Specificity = spec,
+    AUC = roc_auc
+  )
+```
+
+### Key Findings
+
+Table 3 summarises the classification evaluation metrics assessing the model’s performance on the test set. 
+The model achieves an accuracy of 0.862, indicating that 86.2% of customer outcomes are correctly classified, suggesting a strong overall predictive capability.
+
+Using customer churn (Not Retained) as the positive class, the model attains a recall of 0.794, meaning that nearly 80% of customers who eventually churn are successfully identified in advance. 
+This is particularly valuable from a business perspective, as it enables PlatefulNZ to proactively target at-risk customers with retention strategies before churn occurs. 
+At the same time, the specificity of 0.880 demonstrates that the model maintains high accuracy in correctly recognising retained customers, reducing the risk of unnecessary interventions.
+
+As illustrated in Figure 8, the ROC curve provides a clear visual assessment of the model’s ability to distinguish between retained and non-retained customers. 
+The AUC score of 0.911 (see Table 3) further confirms strong discriminatory power, indicating that the model is highly effective in prioritising customers by churn risk for managerial decision-making.
+
+<!-- Four indicators: Logistic Regression & Random Forest -->
+
+```{r table3, echo=FALSE, message=FALSE, warning=FALSE, results="asis"}
+if (knitr::is_latex_output()) {
+  cat("\\makebox[\\textwidth][l]{\\textbf{Table 3}}\\\\\n")
+  cat("\\makebox[\\textwidth][l]{\\textit{Test Set Performance Comparison}}\\\\\n\n")
+} else {
+  cat("**Table 3**  \n*Test Set Performance Comparison*\n\n")
+}
+
+knitr::kable(
+  test_comparison,
+  format = "html",
+  booktabs = TRUE,
+  digits = 3
+) |>
+  kableExtra::kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    font_size = 13
+  )
+```
+
+<!-- ROC curve: Logistic Regression & Random Forest -->
+
+**Figure 8**\
+*ROC Curve - Predicting Customer Churn (Not Retained)*
+
+```{r fig8, echo=FALSE, message=FALSE, warning=FALSE, fig.height=4.2}
+# Ensure the prob column exists (avoid "column doesn't exist")
+stopifnot(".pred_Not Retained" %in% names(logit_test_pred))
+stopifnot(".pred_Not Retained" %in% names(rf_test_pred))
+
+roc_combined <- bind_rows(
+  roc_curve(logit_test_pred, truth = retained_binary, `.pred_Not Retained`) |>
+    mutate(model = "Logistic Regression"),
+  roc_curve(rf_test_pred, truth = retained_binary, `.pred_Not Retained`) |>
+    mutate(model = "Random Forest")
+)
+
+ggplot(roc_combined, aes(x = 1 - specificity, y = sensitivity, color = model)) +
+  geom_path(linewidth = 1.1) +
+  geom_abline(lty = 2) +
+  theme_minimal() +
+  labs(
+    x = "1 - Specificity (False Positive Rate)",
+    y = "Sensitivity (True Positive Rate)",
+    color = "Model"
+  )
+```
+
+Although Random Forest achieved slightly higher AUC and accuracy on the test set, the improvement over Logistic Regression was marginal. Given the comparable predictive performance and the superior interpretability of Logistic Regression, the logistic model was selected as the primary model for managerial insights.
+
+The analysis identified several key drivers of customer retention (see Table 4). Customers with higher purchase frequency were 1.73 times more likely to remain subscribed for each additional purchase, highlighting the importance of encouraging repeat purchasing behaviour. In contrast, each additional week since the last purchase reduced retention odds by approximately 36%, indicating that customer inactivity is a strong early signal of churn risk.
+
+Customer satisfaction also emerged as a critical factor. While low and medium satisfaction levels showed limited impact, highly satisfied customers (scores 4–5) demonstrated substantially stronger retention outcomes, with retention odds up to four times higher than the baseline group. This suggests that service quality improvements are most effective when they elevate customers into the high-satisfaction range, rather than marginally improving already dissatisfied experiences.
+
+Finally, customers who received a discount on their last purchase exhibited significantly lower retention odds, with odds falling to approximately 3% of those who paid full price. This indicates that discounting may often be reactive—targeting customers already at high risk of churn—rather than a reliable long-term retention strategy. Overall, the results suggest that sustainable retention is more effectively driven by consistent engagement and satisfaction, rather than short-term price incentives.
+
+<!-- Create table about coefficient summary -->
+
+```{r table4, echo=FALSE, message=FALSE, warning=FALSE, results="asis"}
+# --- Prepare data for interpretable logistic regression ---
+train_for_glm <- train_data %>%
+  mutate(
+    satisfaction_survey = factor(
+      as.character(satisfaction_survey),
+      levels = c("NoResponse", "1", "2", "3", "4", "5"),
+      ordered = FALSE
+    ),
+    satisfaction_survey = relevel(satisfaction_survey, ref = "NoResponse")
+  )
+
+# Fit logistic regression
+glm_model_final <- glm(
+  retained_binary ~ num_purchases +
+    weeks_since_last_purchase +
+    satisfaction_survey +
+    discounted_rate_last_purchase,
+  data = train_for_glm,
+  family = binomial
+)
+
+# Extract OR table
+logit_or_tbl <- broom::tidy(
+  glm_model_final,
+  exponentiate = TRUE,
+  conf.int = TRUE
+) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    Variable = case_when(
+      term == "num_purchases" ~ "Number of purchases",
+      term == "weeks_since_last_purchase" ~ "Weeks since last purchase",
+      term == "satisfaction_survey1" ~ "Satisfaction: Very low (1)",
+      term == "satisfaction_survey2" ~ "Satisfaction: Low (2)",
+      term == "satisfaction_survey3" ~ "Satisfaction: Medium (3)",
+      term == "satisfaction_survey4" ~ "Satisfaction: High (4)",
+      term == "satisfaction_survey5" ~ "Satisfaction: Very high (5)",
+      term == "discounted_rate_last_purchaseDiscounted" ~
+        "Discounted last purchase (vs Full Price)",
+      TRUE ~ term
+    ),
+    `Odds Ratio` = round(estimate, 3),
+    `95% CI` = paste0("(", round(conf.low, 3), ", ", round(conf.high, 3), ")"),
+    Interpretation = case_when(
+      estimate > 1 ~ "Increases retention odds",
+      estimate < 1 ~ "Decreases retention odds",
+      TRUE ~ "No clear effect"
+    )
+  ) %>%
+  select(Variable, `Odds Ratio`, `95% CI`, Interpretation)
+
+# ---- Explicitly add baseline row ----
+baseline_row <- tibble(
+  Variable = "Satisfaction: No response (Baseline)",
+  `Odds Ratio` = 1,
+  `95% CI` = "Reference",
+  Interpretation = "Baseline group"
+)
+
+# Combine baseline + model results
+final_or_table <- bind_rows(
+  baseline_row,
+  logit_or_tbl
+)
+
+if (knitr::is_latex_output()) {
+  cat("\\makebox[\\textwidth][l]{\\textbf{Table 4}}\\\\\n")
+  cat("\\makebox[\\textwidth][l]{\\textit{Logistic Regression Odds Ratios (with explicit baseline}}\\\\\n\n")
+} else {
+  cat("**Table 4**  \n*Logistic Regression Odds Ratios (with explicit baseline*\n\n")
+}
+
+# Output table
+knitr::kable(
+  final_or_table,
+  format = "html",
+  booktabs = TRUE,
+  align = "lccc"
+) %>%
+  kableExtra::kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    font_size = 12
+  )
+```
+
+## Conclusions and Recommendations
+
+PlatefulNZ’s customer retention is primarily driven by purchase frequency, recent engagement, and customer satisfaction. The results indicate that customers who purchase more frequently have substantially higher retention odds, while extended periods of inactivity are strongly associated with increased churn risk. High satisfaction levels further amplify retention, reinforcing the importance of consistent service quality.
+
+To improve long-term outcomes, PlatefulNZ should focus on initiatives that stimulate repeat purchasing, such as loyalty rewards tied to order frequency or subscription milestones. In addition, early re-engagement strategies—for example, targeted reminders or personalised offers triggered by prolonged inactivity—can help reduce churn risk before disengagement becomes permanent. Finally, investments in service quality improvements informed by customer feedback are likely to deliver greater long-term retention benefits than short-term price discounts. These strategies will help strengthen customer relationships, encourage ongoing engagement, and reduce churn.
+
