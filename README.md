@@ -10,24 +10,24 @@ This project focuses on identifying **customers at risk of churn** and translati
 - Converts analytical outputs into **actionable recommendations for marketing and CRM teams**
 
 ## Live Report
-Interactive report (GitHub Pages):  
+Analytical report (HTML, published via GitHub Pages):
 https://xinyixu-773.github.io/-Customer_Retention_Prediction/
 
 ## Key Business Insights
-- Customer activity patterns (e.g., purchase frequency and recency) are strong predictors of retention
-- Behavioral signals are more informative than static customer attributes
-- Early intervention significantly improves retention effectiveness
+- Customer activity patterns (e.g., purchase frequency and recency) show a  strong association with customer retention outcomes  
+- Behavioral variables provide more predictive value than static customer attributes  
+- Identifying at-risk customers earlier enables more timely and effective retention actions
 
 ## Recommended Actions
-- Prioritise outreach for customers showing early churn signals
-- Segment retention strategies based on customer behaviour
-- Use predictive scores to support campaign targeting decisions
+- Prioritise outreach for customers showing early churn signals identified through behavioural metrics  
+- Segment customers based on observed usage and engagement patterns rather than demographics alone  
+- Use predicted risk scores to support campaign targeting and resource allocation decisions
 
 ## Tools & Skills Demonstrated
-- Business analytics & problem framing
-- Data preparation and exploratory analysis
-- Predictive modeling for decision support
-- Communicating insights through dashboards and reports
+- Business analytics and problem framing  
+- Data preparation and exploratory analysis (R, tidyverse)  
+- Predictive modelling for decision support (logistic regression, tree-based models)  
+- Communicating analytical insights through structured reports and visualisations
 
 ## Repository Structure
 ```text
