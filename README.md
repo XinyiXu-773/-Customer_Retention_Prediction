@@ -30,9 +30,9 @@ https://xinyixu-773.github.io/-Customer_Retention_Prediction/
 - Communicating insights through dashboards and reports
 
 ## Repository Structure
-graphql
-Copy code
-├── code/        # Analysis and modeling scripts
-├── docs/        # Deployed report for GitHub Pages
-├── *.qmd        # Analysis report source
-└── README.md
+```text
+├── code/        # Analysis and modelling scripts
+├── docs/        # Deployed report (GitHub Pages)
+├── *.qmd        # Quarto analysis report source
+└── README.md    # Project overview and business context
+```
