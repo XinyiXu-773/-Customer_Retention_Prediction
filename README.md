@@ -13,6 +13,8 @@ This project focuses on identifying **customers at risk of churn** and translati
 Analytical report (HTML, published via GitHub Pages):
 https://xinyixu-773.github.io/-Customer_Retention_Prediction/
 
+Source analysis code is available in the `analysis/` folder.
+
 ## Key Business Insights
 - Customer activity patterns (e.g., purchase frequency and recency) show a  strong association with customer retention outcomes  
 - Behavioral variables provide more predictive value than static customer attributes  
@@ -31,7 +33,7 @@ https://xinyixu-773.github.io/-Customer_Retention_Prediction/
 
 ## Repository Structure
 ```text
-├── code/        # Analysis and modelling scripts
+├── analysis/        # Analysis and modelling scripts
 ├── docs/        # Deployed report (GitHub Pages)
 ├── *.qmd        # Quarto analysis report source
 └── README.md    # Project overview and business context
