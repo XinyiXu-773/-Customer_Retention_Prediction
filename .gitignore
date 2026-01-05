@@ -1,0 +1,12 @@
+/.quarto/
+# R / RStudio
+.Rhistory
+.RData
+.Rproj.user/
+
+# Quarto
+*_cache/
+*_files/
+
+# renv
+renv/library/
